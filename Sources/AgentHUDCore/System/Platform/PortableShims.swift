@@ -18,6 +18,24 @@ func realpath(_ path: String, _ resolved: UnsafeMutablePointer<CChar>?) -> Unsaf
     guard FileManager.default.fileExists(atPath: path) else { return nil }
     return _strdup(URL(fileURLWithPath: path).resolvingSymlinksInPath().path)
 }
+
+/// The first place `needle` occurs in `haystack`, ASCII letters matching whatever their case, as `strcasestr(3)`.
+func strcasestr(_ haystack: UnsafePointer<CChar>, _ needle: String) -> UnsafePointer<CChar>? {
+    let pattern = Array(needle.utf8).map(lowered)
+    guard !pattern.isEmpty else { return haystack }
+    var start = haystack
+    while start.pointee != 0 {
+        var offset = 0
+        while offset < pattern.count, start[offset] != 0, lowered(UInt8(bitPattern: start[offset])) == pattern[offset] {
+            offset += 1
+        }
+        if offset == pattern.count { return start }
+        start += 1
+    }
+    return nil
+}
+
+private func lowered(_ byte: UInt8) -> UInt8 { (65...90).contains(byte) ? byte + 32 : byte }
 #endif
 
 #if !canImport(os)
