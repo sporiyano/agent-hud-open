@@ -1,6 +1,10 @@
 import AgentHUDSupport
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 enum AntigravitySessions: LocalSessionLayout {
     static let installPaths = [".gemini/antigravity", ".gemini/antigravity-cli", "Applications/Antigravity.app"]

@@ -1,16 +1,66 @@
 import Foundation
+#if canImport(Network)
 import Network
 import os.log
+#endif
+
+/// One request's connection to the process that sent it, which waits on it for an answer.
+@MainActor
+public final class LocalConnection {
+    #if canImport(Network)
+    private let connection: NWConnection
+
+    init(_ connection: NWConnection) { self.connection = connection }
+
+    /// Whether the sender went away or the connection was let go.
+    public var isClosed: Bool {
+        switch connection.state {
+        case .cancelled, .failed: true
+        default: false
+        }
+    }
+
+    /// Called once the sender goes away or the connection is let go; replaces any handler set before.
+    public func onClose(_ handler: @escaping @MainActor () -> Void) {
+        connection.stateUpdateHandler = { state in
+            MainActor.assumeIsolated {
+                switch state {
+                case .cancelled, .failed: handler()
+                default: break
+                }
+            }
+        }
+    }
+
+    /// Writes the answer, then lets the connection go.
+    public func reply(_ data: Data) {
+        let connection = connection
+        connection.send(content: data, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    /// Lets the connection go without an answer.
+    public func cancel() { connection.cancel() }
+    #else
+    public var isClosed: Bool { true }
+
+    public func onClose(_ handler: @escaping @MainActor () -> Void) {}
+
+    public func reply(_ data: Data) {}
+
+    public func cancel() {}
+    #endif
+}
 
 /// The application's side of a `UnixSocket`: it listens at `path` and hands each request, once its sender stopped
 /// writing, to `onRequest` with the connection, which answers it or lets it go. One process serves a path: a lock beside
 /// the socket keeps a second copy of the application from replacing it, and a process removes only the socket it made.
+#if canImport(Network)
 @MainActor
 public final class UnixSocketListener {
     public let path: String
     /// The largest request read; a longer one closes its connection.
     public let requestLimit: Int
-    private let onRequest: @MainActor (Data, NWConnection) -> Void
+    private let onRequest: @MainActor (Data, LocalConnection) -> Void
     private let log: Logger
     private var listener: NWListener?
     /// The lock that makes this process the one serving the path, and the socket file it made, by device and inode.
@@ -20,7 +70,7 @@ public final class UnixSocketListener {
     private var mask: SocketMask?
 
     /// - category: names the socket in the application's log.
-    public init(path: String, requestLimit: Int, category: String, onRequest: @escaping @MainActor (Data, NWConnection) -> Void) {
+    public init(path: String, requestLimit: Int, category: String, onRequest: @escaping @MainActor (Data, LocalConnection) -> Void) {
         self.path = path
         self.requestLimit = requestLimit
         self.onRequest = onRequest
@@ -113,7 +163,7 @@ public final class UnixSocketListener {
                 if let content { data.append(content) }
                 guard let self, data.count <= self.requestLimit else { return connection.cancel() }
                 if isComplete || error != nil {
-                    self.onRequest(data, connection)
+                    self.onRequest(data, LocalConnection(connection))
                 } else {
                     self.receive(connection, accumulated: data)
                 }
@@ -145,3 +195,24 @@ private final class SocketMask {
         if Self.holds == 0 { umask(Self.found) }
     }
 }
+
+#else
+/// Off macOS nothing listens yet: `start()` reports that the channel could not be opened.
+@MainActor
+public final class UnixSocketListener {
+    public let path: String
+    public let requestLimit: Int
+
+    public init(path: String, requestLimit: Int, category: String, onRequest: @escaping @MainActor (Data, LocalConnection) -> Void) {
+        self.path = path
+        self.requestLimit = requestLimit
+    }
+
+    public var isListening: Bool { false }
+
+    @discardableResult
+    public func start() -> Bool { false }
+
+    public func stop() {}
+}
+#endif

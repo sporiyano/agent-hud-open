@@ -1,5 +1,7 @@
 import AgentHUDSupport
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// Desktop IPC frames are a UInt32 little-endian length followed by UTF-8 JSON, rather than app-server JSON-RPC.
@@ -30,6 +32,10 @@ public final class CodexDesktopIPC {
 
     public init(path: String, timeout: TimeInterval) throws {
         deadline = ProcessInfo.processInfo.systemUptime + timeout
+        #if !canImport(Darwin)
+        // Desktop's hub on Windows is not reached yet.
+        throw Failure.unavailable
+        #else
         var info = stat()
         guard UnixSocket.fits(path), stat(path, &info) == 0, info.st_uid == getuid(),
               (info.st_mode & S_IFMT) == S_IFSOCK else {
@@ -63,9 +69,14 @@ public final class CodexDesktopIPC {
             Darwin.close(descriptor)
             throw error
         }
+        #endif
     }
 
-    public func close() { Darwin.close(descriptor) }
+    public func close() {
+        #if canImport(Darwin)
+        Darwin.close(descriptor)
+        #endif
+    }
 
     public func request(method: String, version: Int, source: String, target: String? = nil,
                         params: [String: Any], didWrite: (() -> Void)? = nil) throws -> [String: Any] {
@@ -143,6 +154,9 @@ public final class CodexDesktopIPC {
 
     /// Whether a message began to arrive within `seconds`. A closed connection throws.
     public func waitForMessage(_ seconds: TimeInterval) throws -> Bool {
+        #if !canImport(Darwin)
+        throw Failure.unavailable
+        #else
         while true {
             var entry = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
             let result = poll(&entry, 1, Int32(max(0, min(seconds * 1000, Double(Int32.max)))))
@@ -151,6 +165,7 @@ public final class CodexDesktopIPC {
             guard result > 0, entry.revents & Int16(POLLIN) != 0 else { throw Failure.unavailable }
             return true
         }
+        #endif
     }
 
     /// The next message as its bytes, of at most `limit`, within the connection's current time.
@@ -182,6 +197,10 @@ public final class CodexDesktopIPC {
         var length = UInt32(payload.count).littleEndian
         var bytes = withUnsafeBytes(of: &length) { Data($0) }
         bytes.append(payload)
+        #if !canImport(Darwin)
+        _ = didWrite
+        throw Failure.unavailable
+        #else
         var offset = 0
         while offset < bytes.count {
             try wait(for: Int16(POLLOUT))
@@ -191,6 +210,7 @@ public final class CodexDesktopIPC {
             if offset == 0 { didWrite?() }
             offset += count
         }
+        #endif
     }
 
     private func receive() throws -> [String: Any] {
@@ -210,6 +230,9 @@ public final class CodexDesktopIPC {
     /// A message this long is read into memory mapped for it alone.
     private static let mappedFrom = 1024 * 1024
 
+    #if !canImport(Darwin)
+    private func read(_ count: Int) throws -> Data { throw Failure.unavailable }
+    #else
     private func read(_ count: Int) throws -> Data {
         // A long thread's state is a hundred megabytes in one message. Memory the allocator frees after such a message
         // stays counted as this process's (110 MB measured after one of 108 MB); a mapping goes back as it is released.
@@ -259,4 +282,5 @@ public final class CodexDesktopIPC {
             return
         }
     }
+    #endif
 }

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
 
 /// Antigravity's already-running local services. Credentials stay in memory and are sent only to loopback.
 enum AntigravityService {

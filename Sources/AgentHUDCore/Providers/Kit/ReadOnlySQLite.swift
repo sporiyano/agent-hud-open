@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 /// Normal SQLite read transactions include active WAL data; no copying or immutable reads of live databases.
 /// A WAL database's writer may remove its `-wal` and `-shm` files on close, and the system SQLite does not let a
@@ -47,9 +51,16 @@ final class ReadOnlySQLite {
 
     /// Device, inode, size and modification time, which any write to the file or its replacement changes.
     private static func signature(_ path: String) -> [Int]? {
+        #if !canImport(Darwin)
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return [(attributes[.systemFileNumber] as? Int) ?? 0, (attributes[.size] as? Int) ?? 0,
+                Int(modified), Int((modified - modified.rounded(.down)) * 1_000_000_000)]
+        #else
         var info = stat()
         guard stat(path, &info) == 0 else { return nil }
         return [Int(info.st_dev), Int(truncatingIfNeeded: info.st_ino), Int(info.st_size), info.st_mtimespec.tv_sec, info.st_mtimespec.tv_nsec]
+        #endif
     }
 
     deinit {

@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 /// A read-write SQLite connection confined to one actor. Prepared statements are reused by SQL text.
 final class SQLiteConnection {

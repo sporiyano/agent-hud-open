@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// A daemon thread's `codex_tui` MCP endpoint belongs to its terminal frontend, even when the daemon's own environment
@@ -66,6 +68,9 @@ public enum CodexTerminalOrigins {
     }
 
     private static func listenerTargets(ports: Set<UInt16>) -> [UInt16: SessionNavigationTarget] {
+        #if !canImport(Darwin)
+        return [:]
+        #else
         let uid = getuid()
         let bytes = proc_listpids(UInt32(PROC_UID_ONLY), uid, nil, 0)
         guard bytes > 0 else { return [:] }
@@ -88,9 +93,13 @@ public enum CodexTerminalOrigins {
         }
         ambiguous.forEach { result.removeValue(forKey: $0) }
         return result
+        #endif
     }
 
     static func processIdentity(_ pid: pid_t) -> ProcessIdentity? {
+        #if !canImport(Darwin)
+        return nil
+        #else
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_start_tvsec > 0 else { return nil }
@@ -99,8 +108,10 @@ public enum CodexTerminalOrigins {
         let executable = String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         return ProcessIdentity(pid: pid, uid: info.pbi_uid, startSeconds: info.pbi_start_tvsec,
                                startMicroseconds: info.pbi_start_tvusec, executable: executable)
+        #endif
     }
 
+    #if canImport(Darwin)
     private static func listeningPorts(_ pid: pid_t) -> Set<UInt16> {
         let bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
         guard bytes > 0, bytes <= 1024 * 1024 else { return [] }
@@ -120,13 +131,18 @@ public enum CodexTerminalOrigins {
         }
         return ports
     }
+    #endif
 
     static func argumentsData(_ pid: pid_t) -> Data? {
+        #if !canImport(Darwin)
+        return nil
+        #else
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid], size = 0
         guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 4, size <= 1024 * 1024 else { return nil }
         var data = Data(count: size)
         guard data.withUnsafeMutableBytes({ sysctl(&mib, u_int(mib.count), $0.baseAddress, &size, nil, 0) }) == 0 else { return nil }
         data.count = size
         return data
+        #endif
     }
 }

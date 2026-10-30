@@ -1,5 +1,7 @@
-import CoreServices
 import Foundation
+
+#if canImport(CoreServices)
+import CoreServices
 import os
 
 /// Tells what changed under a set of directories since the previous check, using FSEvents.
@@ -117,3 +119,18 @@ final class FileChangeMonitor {
         self.stream = nil
     }
 }
+
+#else
+/// Without FSEvents nothing is watched yet: every check reports a change, so sources are read on their schedule.
+final class FileChangeMonitor {
+    init(directories: [URL], onChange: (@Sendable () -> Void)? = nil) {}
+
+    var isWatching: Bool { false }
+
+    func update() {}
+
+    func consumeChanges() -> Bool { true }
+
+    func consumePaths() -> Set<String>? { nil }
+}
+#endif

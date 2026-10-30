@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 
 // Credential order and request headers follow Tokscale usage/copilot.rs (MIT); quota fields are informed by CodexBar CopilotUsageFetcher (MIT).
 struct CopilotClient: Sendable {
@@ -155,10 +157,15 @@ struct CopilotCredentials: Sendable {
     }
 
     static func genericPassword(service: String) -> String? {
+        #if !canImport(Security)
+        // Windows Credential Manager comes with the Windows build; the environment and hosts.yml still apply.
+        return nil
+        #else
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                     kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+        #endif
     }
 }

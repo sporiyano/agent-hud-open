@@ -1,5 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(Security)
 import Security
+#endif
 
 /// Credential-bearing requests never follow redirects or use the shared cookie/cache stores.
 struct ProviderHTTP: Sendable {
@@ -26,6 +31,7 @@ struct ProviderHTTP: Sendable {
         config.timeoutIntervalForResource = request.timeoutInterval + 1
         let session = URLSession(configuration: config, delegate: Delegate(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
+        #if canImport(Darwin)
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else { throw ProviderFailure.format }
         guard (200..<300).contains(response.statusCode) else {
@@ -37,6 +43,16 @@ struct ProviderHTTP: Sendable {
             data.append(byte)
         }
         return data
+        #else
+        // No byte stream there: the whole body arrives, then the same limit applies.
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw ProviderFailure.format }
+        guard (200..<300).contains(response.statusCode) else {
+            throw ProviderHTTPError(status: response.statusCode)
+        }
+        guard data.count <= 16 * 1024 * 1024 else { throw ProviderFailure.limit }
+        return data
+        #endif
     }
 
     private final class Delegate: NSObject, URLSessionTaskDelegate, Sendable {
@@ -44,6 +60,7 @@ struct ProviderHTTP: Sendable {
                         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
             completionHandler(nil)
         }
+        #if canImport(Security)
         func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
                         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
             let space = challenge.protectionSpace
@@ -52,6 +69,7 @@ struct ProviderHTTP: Sendable {
                 completionHandler(.useCredential, URLCredential(trust: trust))
             } else { completionHandler(.performDefaultHandling, nil) }
         }
+        #endif
     }
 }
 

@@ -1,6 +1,10 @@
 import AgentHUDSupport
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 // Transcript stores, response identities and bookkeeping-row exclusions follow Tokscale openclaw.rs (MIT).
 enum OpenClawSessions: LocalSessionLayout {

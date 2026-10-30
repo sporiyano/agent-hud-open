@@ -1,9 +1,14 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
 
 enum DeepSeekRuntime {
     /// Inspect the Harness processes holding this Harness home's profile files, without reading credentials.
     static func processStarts(directory: URL) async -> [Date] {
+        #if !canImport(Darwin)
+        return []
+        #else
         await Task.detached(priority: .utility) {
             let profiles = directory.appendingPathComponent("profiles")
             let files = ((try? FileManager.default.contentsOfDirectory(at: profiles, includingPropertiesForKeys: nil)) ?? [])
@@ -24,6 +29,7 @@ enum DeepSeekRuntime {
                 return Date(timeIntervalSince1970: Double(info.pbi_start_tvsec) + Double(info.pbi_start_tvusec) / 1_000_000)
             }
         }.value
+        #endif
     }
 
     /// A command-line Harness runs on Node. The desktop app runs its Host, which holds `profiles/desktop/cordis.yml`, and

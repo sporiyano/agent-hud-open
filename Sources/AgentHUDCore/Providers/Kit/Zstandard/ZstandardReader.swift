@@ -7,7 +7,11 @@ final class ZstandardReader {
     /// The largest window a frame may ask for: the reference decoder's default limit.
     static let largestWindow = 1 << 27
 
+    #if canImport(Darwin)
     private let descriptor: Int32
+    #else
+    private let handle: FileHandle
+    #endif
     private static let inputCapacity = 256 << 10
     /// Compressed bytes read from the file and not decoded yet; the 16 bytes past its capacity are padding that bit
     /// readers may load without using.
@@ -29,16 +33,29 @@ final class ZstandardReader {
     }
 
     init(url: URL) throws {
+        #if canImport(Darwin)
         descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
         guard descriptor >= 0 else {
             input.deallocate(); output.deallocate()
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
+        #else
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            input.deallocate(); output.deallocate()
+            throw error
+        }
+        #endif
         input.initialize(repeating: 0, count: Self.inputCapacity + 16)
     }
 
     deinit {
+        #if canImport(Darwin)
         close(descriptor)
+        #else
+        try? handle.close()
+        #endif
         input.deallocate()
         output.deallocate()
     }
@@ -186,11 +203,17 @@ final class ZstandardReader {
             inputStart = 0
         }
         while inputEnd < count, !fileEnded {
+            #if canImport(Darwin)
             let length = Darwin.read(descriptor, input + inputEnd, Self.inputCapacity - inputEnd)
             if length < 0 {
                 if errno == EINTR { continue }
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
+            #else
+            let chunk = try handle.read(upToCount: Self.inputCapacity - inputEnd) ?? Data()
+            chunk.copyBytes(to: input + inputEnd, count: chunk.count)
+            let length = chunk.count
+            #endif
             if length == 0 { fileEnded = true } else { inputEnd += length }
         }
         return inputEnd - inputStart >= count

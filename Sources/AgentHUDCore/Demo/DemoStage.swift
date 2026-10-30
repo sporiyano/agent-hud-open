@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(os)
 import os
+#endif
 
 /// What a scripted demo shows right now: which sessions run, what each window reads, the turns that have ended and
 /// the requests waiting. The demo's provider builds its report from this instead of from its fixed figures.

@@ -1,6 +1,10 @@
 import AgentHUDSupport
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 // Per-model usage rows and the session-total fallback follow Tokscale hermes.rs (MIT).
 enum HermesSessions: LocalSessionLayout {
