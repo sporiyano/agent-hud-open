@@ -5,7 +5,7 @@ import PackageDescription
 // AppKit and SwiftUI, so they exist only on macOS; the Windows interface is a separate shell over Core.
 
 /// Off Apple platforms CryptoKit and the system SQLite are not there; these packages stand in for them.
-let portable: TargetDependencyCondition = .when(platforms: [.windows, .linux])
+let portable: TargetDependencyCondition? = .when(platforms: [.windows, .linux])
 let crypto: Target.Dependency = .product(name: "Crypto", package: "swift-crypto", condition: portable)
 let sqlite: Target.Dependency = .product(name: "SwiftToolchainCSQLite", package: "swift-toolchain-sqlite",
                                          condition: portable)
