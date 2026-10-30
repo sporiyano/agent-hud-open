@@ -250,10 +250,26 @@ public enum FastTranscriptParser {
     private static func find(_ pattern: [UInt8], in buffer: UnsafeRawBufferPointer, backwards: Bool = false) -> Int? {
         guard let base = buffer.baseAddress, buffer.count >= pattern.count, !pattern.isEmpty else { return nil }
         if !backwards {
+            #if canImport(Darwin)
             return pattern.withUnsafeBytes { needle -> Int? in
                 guard let hit = memmem(base, buffer.count, needle.baseAddress, needle.count) else { return nil }
                 return base.distance(to: hit)
             }
+            #else
+            // No memmem there: memchr finds each candidate first byte, memcmp checks the rest.
+            return pattern.withUnsafeBytes { needle -> Int? in
+                guard let needleBase = needle.baseAddress else { return nil }
+                let last = buffer.count - pattern.count
+                var start = 0
+                while start <= last {
+                    guard let hit = memchr(base + start, Int32(pattern[0]), last - start + 1) else { return nil }
+                    let index = base.distance(to: UnsafeRawPointer(hit))
+                    if memcmp(base + index, needleBase, pattern.count) == 0 { return index }
+                    start = index + 1
+                }
+                return nil
+            }
+            #endif
         }
         let first = pattern[0]
         var index = buffer.count - pattern.count
