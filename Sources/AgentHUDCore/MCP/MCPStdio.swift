@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// The `--mcp` command: the process an agent's client starts to reach Agent HUD's tools, and keeps for as long as it
@@ -19,16 +21,45 @@ enum MCPStdio {
 
     /// Serves standard input until it ends and returns the process's exit status.
     static func run() -> Int32 {
+        #if canImport(Darwin)
         // A client that went away must end the process through a failed write, not a signal.
         signal(SIGPIPE, SIG_IGN)
+        #endif
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         let socket = MCPAppChannel.socketPath()
         let directoryName = AppSupport.directoryName(of: .main)
         let server = MCPServer(version: version) {
             MCPAppClient.call($0, socket: socket, lock: InstanceLock.sharedURL, dataDirectoryName: directoryName)
         }
+        #if canImport(Darwin)
         return run(server, input: STDIN_FILENO, output: STDOUT_FILENO)
+        #else
+        return run(server, input: .standardInput, output: .standardOutput)
+        #endif
     }
+
+    #if !canImport(Darwin)
+    /// Answers the lines read from `input` on `output` until `input` ends, as the descriptor version does.
+    static func run(_ server: MCPServer, input: FileHandle, output: FileHandle) -> Int32 {
+        var lines = MCPLineBuffer()
+        while true {
+            let data = input.availableData
+            if data.isEmpty { break }
+            for line in lines.take(data) {
+                guard write(server.lines(for: line), to: output) else { return 0 }
+            }
+        }
+        if let last = lines.rest() { _ = write(server.lines(for: last), to: output) }
+        return 0
+    }
+
+    private static func write(_ lines: [String], to output: FileHandle) -> Bool {
+        for line in lines {
+            do { try output.write(contentsOf: Data((line + "\n").utf8)) } catch { return false }
+        }
+        return true
+    }
+    #else
 
     /// Answers the lines read from `input` on `output` until `input` ends: 0 then, and also once nobody reads
     /// `output` any more; 1 when `input` cannot be read.
@@ -82,6 +113,7 @@ enum MCPStdio {
             return false
         }
     }
+    #endif
 }
 
 /// Cuts the bytes a stream delivers into its lines, however the reads fall. A line longer than `limit` keeps its

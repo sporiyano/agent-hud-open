@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// The `--mcp` process's side of the channel to the running application: one connection per tool call, which sends
@@ -40,6 +42,9 @@ enum MCPAppClient {
     }
 
     static func call(_ request: MCPToolRequest, socket path: String, timeout: TimeInterval = timeout) -> Answer {
+        #if !canImport(Darwin)
+        return .notRunning
+        #else
         guard let descriptor = UnixSocket.connect(to: path) else { return .notRunning }
         defer { close(descriptor) }
         let message = request.message
@@ -57,7 +62,10 @@ enum MCPAppClient {
         shutdown(descriptor, SHUT_WR)
         guard let data = read(descriptor, until: deadline), let reply = MCPToolReply.read(data) else { return .unanswered }
         return .reply(reply)
+        #endif
     }
+
+    #if canImport(Darwin)
 
     /// Everything the other side wrote before it closed; nil when it has not closed by `deadline` or wrote more than
     /// `replyLimit`.
@@ -79,4 +87,5 @@ enum MCPAppClient {
             guard reply.count <= replyLimit else { return nil }
         }
     }
+    #endif
 }

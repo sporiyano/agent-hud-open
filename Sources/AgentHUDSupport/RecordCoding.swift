@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Deterministic encoding for persisted records and their identities.
 public enum RecordCoding {

@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 /// The visible prompts and final replies in Antigravity's own conversation database. This is an explicit conversation
 /// read, separate from the usage reader: reasoning, tool arguments/results and generated context never leave the file.

@@ -1,6 +1,6 @@
 import AgentHUDSupport
 import Foundation
-import Network
+import Observation
 
 /// A failure whose description can go into the log as it is: its case and any reason the client gave, never an answer
 /// or what a request is about.
@@ -23,7 +23,7 @@ public final class PermissionRequests {
     private var sessionsWaiting: [PermissionHooks.Source: [String: Date]] = [:]
 
     private enum Waiting {
-        case hook(NWConnection)
+        case hook(LocalConnection)
         case native(@MainActor (PermissionDecision) async throws -> Void)
     }
     @ObservationIgnored private var waiting: [String: Waiting] = [:]
@@ -73,7 +73,7 @@ public final class PermissionRequests {
 
     // MARK: Receiving
 
-    private func register(_ data: Data, connection: NWConnection) {
+    private func register(_ data: Data, connection: LocalConnection) {
         // The hook names its own client; a payload that arrives on this socket without one cannot be placed.
         guard let source = source(of: data), source.usesHook else { return connection.cancel() }
         guard source == .codex else { return present(data, source: source, connection: connection) }
@@ -84,12 +84,9 @@ public final class PermissionRequests {
         }
     }
 
-    private func present(_ data: Data, source: PermissionHooks.Source, connection: NWConnection) {
+    private func present(_ data: Data, source: PermissionHooks.Source, connection: LocalConnection) {
         // A client that gave up while its request was being placed has no question left.
-        switch connection.state {
-        case .cancelled, .failed: return
-        default: break
-        }
+        guard !connection.isClosed else { return }
         counter &+= 1
         let id = "\(source.rawValue)-\(counter)"
         guard let request = try? PermissionRequest.parse(data, source: source, id: id, now: Date()) else {
@@ -100,16 +97,9 @@ public final class PermissionRequests {
         scheduleExpiry(request)
         // A client that gives up closes the socket. That is the only signal that a request stopped being a question,
         // and it arrives whether the user answered in the terminal, the hook timed out or the client was killed.
-        connection.stateUpdateHandler = { [weak self] state in
-            MainActor.assumeIsolated {
-                switch state {
-                case .cancelled, .failed:
-                    // An answered request is already gone from the table, so its own teardown withdraws nothing.
-                    self?.withdraw(id)
-                default:
-                    break
-                }
-            }
+        connection.onClose { [weak self] in
+            // An answered request is already gone from the table, so its own teardown withdraws nothing.
+            self?.withdraw(id)
         }
     }
 
@@ -191,9 +181,7 @@ public final class PermissionRequests {
         guard let client = waiting.removeValue(forKey: id) else { return }
         switch client {
         case .hook(let connection):
-            connection.send(content: decision.response(for: request), completion: .contentProcessed { _ in
-                connection.cancel()
-            })
+            connection.reply(decision.response(for: request))
         case .native(let answer):
             dismissedNative[id] = request.source
             let task = Task { [weak self] in

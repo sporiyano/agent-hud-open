@@ -1,6 +1,10 @@
 import AgentHUDSupport
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import SwiftToolchainCSQLite
+#endif
 
 // ZCode `model_usage` columns and token layouts follow Tokscale zcode.rs (MIT).
 enum ZCodeSessions: LocalSessionLayout {

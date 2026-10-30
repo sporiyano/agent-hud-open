@@ -1,5 +1,7 @@
-import Darwin
 import Foundation
+
+#if canImport(Darwin)
+import Darwin
 
 /// A unix-domain stream socket between the running application and the short-lived processes a client's hooks start. A
 /// request is one message, which its sender ends by closing its writing side; only the user can reach the socket.
@@ -68,3 +70,16 @@ public enum UnixSocket {
         return response
     }
 }
+
+#else
+/// Off macOS there are no unix sockets yet: nothing connects, so every hook and tool call finds no application.
+public enum UnixSocket {
+    public static func fits(_ path: String) -> Bool { path.utf8.count < 104 }
+
+    public static func connect(to path: String) -> Int32? { nil }
+
+    public static func send(_ descriptor: Int32, _ data: Data) -> Bool { false }
+
+    public static func readToEnd(_ descriptor: Int32, limit: Int) -> Data { Data() }
+}
+#endif

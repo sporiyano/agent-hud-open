@@ -1,5 +1,7 @@
 import AgentHUDSupport
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// The `--permission-hook` side: a short-lived process the client starts and then waits on.
@@ -15,6 +17,7 @@ public enum PermissionHookClient {
     public static let sourceKey = "_agentHUDSource"
 
     public static func run(source: PermissionHooks.Source) {
+        #if canImport(Darwin)
         // A HUD that stops reading must never raise a signal in the client's hook process.
         signal(SIGPIPE, SIG_IGN)
         signal(SIGALRM) { _ in _exit(0) }
@@ -43,6 +46,8 @@ public enum PermissionHookClient {
         watch?.stop()
         guard !response.isEmpty else { return }
         FileHandle.standardOutput.write(response)
+        #endif
+        // Elsewhere there is no channel to the HUD yet: the hook prints nothing and the client asks as it always does.
     }
 
     /// Adds the client's name to a request the HUD can answer. The hook reads nothing of the session itself: a Codex

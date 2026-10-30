@@ -48,6 +48,7 @@ struct PermissionTranscript {
     }
 }
 
+#if canImport(Darwin)
 /// Follows one session record from the hook until the call it asked about is settled, then says so once.
 ///
 /// What is already in the record is read first, so a call written before the hook started is known and an earlier
@@ -118,3 +119,4 @@ final class PermissionTranscriptWatch: @unchecked Sendable {
         return settledNow
     }
 }
+#endif

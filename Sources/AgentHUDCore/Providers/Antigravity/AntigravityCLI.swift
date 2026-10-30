@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// The quota a running `agy` prints for `agy -p /usage`. agy's own language server answers only requests carrying a CSRF
@@ -10,12 +12,16 @@ struct AntigravityCLI: Sendable {
     /// The program of the first running `agy` among the candidates, as the system names it, so the client that runs is
     /// the one asked rather than any program of that name.
     static func executable(of candidates: [AntigravityService.Candidate]) -> URL? {
+        #if !canImport(Darwin)
+        return nil
+        #else
         candidates.lazy.compactMap { candidate -> URL? in
             var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
             guard proc_pidpath(Int32(candidate.pid), &path, UInt32(path.count)) > 0 else { return nil }
             let url = URL(fileURLWithPath: String(cString: path))
             return url.lastPathComponent == "agy" ? url : nil
         }.first
+        #endif
     }
 
     func quota(executable: URL) async throws -> ProviderQuota {

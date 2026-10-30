@@ -1,5 +1,4 @@
 import Foundation
-import Network
 
 /// The application's side of the channel MCP tool calls arrive on: a socket named `mcp.sock` in the data directory,
 /// which the `--mcp` process a client started connects to once per call. Each request is handed to `handler` on the
@@ -40,7 +39,7 @@ public final class MCPAppChannel {
             } catch {
                 reply = .failure("The request could not be read.")
             }
-            connection.send(content: reply.message, completion: .contentProcessed { _ in connection.cancel() })
+            connection.reply(reply.message)
         }
         guard listener.start() else { return false }
         self.listener = listener

@@ -1,0 +1,48 @@
+name: Portable core
+
+# Builds the data libraries off macOS: Windows, where the Windows application runs on them, and Linux, which is
+# quicker to read failures from. The desktop interface is macOS only and is not part of these builds.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.1.2-release
+          tag: 6.1.2-RELEASE
+      - name: Build AgentHUDCore
+        shell: bash
+        run: |
+          set -o pipefail
+          swift build --target AgentHUDCore 2>&1 | tee build.log || {
+            echo "=== DISTINCT ERRORS ==="; grep -E "(\.swift:[0-9]+:[0-9]+: error:|^error:)" build.log | sed -E 's/^.*Sources/Sources/' | sort -u | head -300
+            exit 1
+          }
+
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.1.2-noble
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build AgentHUDCore
+        shell: bash
+        run: |
+          set -o pipefail
+          swift build --target AgentHUDCore 2>&1 | tee build.log || {
+            echo "=== DISTINCT ERRORS ==="; grep -E "(\.swift:[0-9]+:[0-9]+: error:|^error:)" build.log | sed -E 's/^.*Sources/Sources/' | sort -u | head -300
+            exit 1
+          }

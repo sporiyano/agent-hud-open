@@ -29,10 +29,18 @@ public final class InstanceLock: Sendable {
 
     private init(descriptor: Int32) { self.descriptor = descriptor }
 
-    deinit { close(descriptor) }
+    deinit {
+        #if canImport(Darwin)
+        close(descriptor)
+        #endif
+    }
 
     /// Takes the lock at `url` and writes `executable` into it, so that a launch it turns away can say which copy runs.
     public static func claim(at url: URL = sharedURL, executable: URL? = Bundle.main.executableURL) -> Claim {
+        #if !canImport(Darwin)
+        // A Windows lock comes with the Windows build of the application; until then it runs without one.
+        return .unavailable
+        #else
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         } catch {
@@ -57,6 +65,7 @@ public final class InstanceLock: Sendable {
             && path.withUnsafeBytes { pwrite(descriptor, $0.baseAddress, $0.count, 0) } == path.count
         if !written { NSLog("[AgentHUD] Could not name this copy in the instance lock: %@", String(cString: strerror(errno))) }
         return .acquired(InstanceLock(descriptor: descriptor))
+        #endif
     }
 
     /// The application that holds the lock at `url` now, named as a refused claim names it; nil when no copy holds it
@@ -64,6 +73,9 @@ public final class InstanceLock: Sendable {
     /// copy that starts meanwhile is not turned away. A process that must not start the application, such as `--mcp`,
     /// learns from it whether one runs.
     static func runningApplication(at url: URL = sharedURL) -> URL? {
+        #if !canImport(Darwin)
+        return nil
+        #else
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
         guard descriptor >= 0 else { return nil }
         defer { close(descriptor) }
@@ -74,6 +86,7 @@ public final class InstanceLock: Sendable {
         probe.l_whence = Int16(SEEK_SET)
         guard fcntl(descriptor, F_GETLK, &probe) == 0, probe.l_type != Int16(F_UNLCK) else { return nil }
         return holder(at: url)
+        #endif
     }
 
     /// The application whose executable the holder wrote: `…/Name.app` for one that runs in a bundle. Nil while the

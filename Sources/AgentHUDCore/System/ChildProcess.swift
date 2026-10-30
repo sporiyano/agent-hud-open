@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// A child process that cannot stall its caller. Both pipes are drained while it runs, each up to a byte cap, and reading
@@ -23,7 +25,12 @@ public final class ChildProcess: @unchecked Sendable {
     private let stdoutLimit: Int
     /// Default QoS, like the child: a lower one lets a busy machine starve the drain into a timeout.
     private let queue = DispatchQueue(label: "app.agenthud.child-process")
+    #if canImport(Darwin)
     private var streams: [(source: DispatchSourceRead, isStdout: Bool)] = []
+    #else
+    /// Pipes still being read by their threads; the child's end waits for them a moment.
+    private var openReaders = 2, hasExited = false, finished = false
+    #endif
     // Confined to `queue` after init.
     private var input: FileHandle?
     private var collected = Output()
@@ -46,6 +53,7 @@ public final class ChildProcess: @unchecked Sendable {
         process.standardInput = stdin ?? FileHandle.nullDevice
         process.standardOutput = stdout
         process.standardError = stderr
+        #if canImport(Darwin)
         if let stdin {
             // A write after the child is gone fails with EPIPE instead of raising SIGPIPE in this process.
             _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
@@ -68,6 +76,29 @@ public final class ChildProcess: @unchecked Sendable {
             streams.forEach { $0.source.cancel() }
             throw error
         }
+        #else
+        self.input = stdin?.fileHandleForWriting
+        process.terminationHandler = { [self] _ in queue.async { self.exited() } }
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            throw error
+        }
+        // Pipes there cannot be waited on, so a thread per pipe blocks in its reads and hands each chunk to the queue.
+        for (pipe, isStdout) in [(stdout, true), (stderr, false)] {
+            let handle = pipe.fileHandleForReading
+            Thread.detachNewThread { [self] in
+                while true {
+                    let data = handle.availableData
+                    if data.isEmpty { break }
+                    queue.async { self.store(data, isStdout: isStdout) }
+                }
+                try? handle.close()
+                queue.async { self.readerEnded() }
+            }
+        }
+        #endif
     }
 
     /// Runs a child without stdin until it exits; at the deadline it is stopped and the output has no status.
@@ -83,7 +114,11 @@ public final class ChildProcess: @unchecked Sendable {
     /// Writes to stdin. Requests are small, so a child that does not read cannot block the drain.
     public func write(_ data: Data) throws {
         try queue.sync {
+            #if canImport(Darwin)
             guard let input else { throw POSIXError(.EPIPE) }
+            #else
+            guard let input else { throw CocoaError(.fileWriteUnknown) }
+            #endif
             try input.write(contentsOf: data)
         }
     }
@@ -117,7 +152,9 @@ public final class ChildProcess: @unchecked Sendable {
             if process.isRunning { process.terminate() }
             queue.asyncAfter(deadline: .now() + Self.grace) { [weak self] in
                 guard let self, collected.status == nil, process.isRunning else { return }
+                #if canImport(Darwin)
                 kill(process.processIdentifier, SIGKILL)
+                #endif
             }
         }
     }
@@ -155,6 +192,7 @@ public final class ChildProcess: @unchecked Sendable {
         current.continuation.resume()
     }
 
+    #if canImport(Darwin)
     /// Reads one chunk, leaving the queue free between chunks. Returns 0 at EOF or on failure, -1 when nothing is ready.
     private func read(_ fd: Int32, isStdout: Bool) -> Int {
         let count = chunk.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
@@ -183,4 +221,40 @@ public final class ChildProcess: @unchecked Sendable {
         input = nil
         wake()
     }
+    #else
+    /// Keeps what fits under the pipe's cap.
+    private func store(_ data: Data, isStdout: Bool) {
+        guard !finished else { return }
+        let held = isStdout ? collected.stdout.count : collected.stderr.count
+        let kept = min(data.count, max(0, (isStdout ? stdoutLimit : Self.stderrLimit) - held))
+        if kept > 0 {
+            if isStdout { collected.stdout.append(data.prefix(kept)) } else { collected.stderr.append(data.prefix(kept)) }
+        }
+        if isStdout, kept < data.count { collected.truncated = true }
+        wake()
+    }
+
+    private func readerEnded() {
+        openReaders -= 1
+        if hasExited, openReaders == 0 { finish() }
+    }
+
+    /// What the child wrote before it exited is still on its way from the reading threads; a grandchild that keeps a
+    /// pipe open is not waited for beyond a moment.
+    private func exited() {
+        process.terminationHandler = nil
+        hasExited = true
+        if openReaders == 0 { return finish() }
+        queue.asyncAfter(deadline: .now() + 0.25) { [self] in finish() }
+    }
+
+    private func finish() {
+        guard !finished else { return }
+        finished = true
+        collected.status = process.terminationStatus
+        try? input?.close()
+        input = nil
+        wake()
+    }
+    #endif
 }

@@ -49,8 +49,17 @@ bundled = "Sources/AgentHUDDesktop/Resources/THIRD_PARTY_NOTICES.txt"
 if (ROOT / "THIRD_PARTY_NOTICES.txt").read_bytes() != (ROOT / bundled).read_bytes():
     failures.append(f"{bundled}: differs from THIRD_PARTY_NOTICES.txt; copy the root file over it")
 
+# Reviewed packages: Apple's and the Swift project's own, which stand in for CryptoKit and the system SQLite off
+# macOS. Any other package is reviewed before it is added here.
+reviewed_packages = {
+    "https://github.com/apple/swift-crypto.git",
+    "https://github.com/swiftlang/swift-toolchain-sqlite.git",
+}
 manifest = (ROOT / "Package.swift").read_text()
-if re.search(r"\.package\s*\(", manifest):
+for match in re.finditer(r"\.package\s*\(\s*url:\s*\"([^\"]+)\"", manifest):
+    if match.group(1) not in reviewed_packages:
+        failures.append(f"Package.swift: review the package {match.group(1)} before including it")
+if len(re.findall(r"\.package\s*\(", manifest)) != len(re.findall(r"\.package\s*\(\s*url:", manifest)):
     failures.append("Package.swift: review external package dependencies before including them")
 
 # Verify ignore rules without creating any secret-shaped files.

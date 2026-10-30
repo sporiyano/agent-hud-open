@@ -20,7 +20,17 @@ public enum SessionProject: Hashable, Sendable {
     }
 
     public var label: String {
-        path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? L10n.text("未归属项目", "Unassigned project")
+        path.map(Self.abbreviated) ?? L10n.text("未归属项目", "Unassigned project")
+    }
+
+    /// The path with the home folder written as `~`.
+    private static func abbreviated(_ path: String) -> String {
+        #if canImport(Darwin)
+        (path as NSString).abbreviatingWithTildeInPath
+        #else
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path == home || path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+        #endif
     }
 
     /// Read Git's own pointers instead of inferring a repository from a folder name or a worktree location.
