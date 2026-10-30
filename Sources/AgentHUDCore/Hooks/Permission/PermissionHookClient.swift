@@ -46,8 +46,17 @@ public enum PermissionHookClient {
         watch?.stop()
         guard !response.isEmpty else { return }
         FileHandle.standardOutput.write(response)
+        #elseif os(Windows)
+        let input = FileHandle.standardInput.readDataToEndOfFile()
+        guard let payload = tagged(input, source: source) else { return }
+        if source == .claude, ClaudeHeadlessRuns.current() { return }
+        // The HUD's pipe; the wait for the user is the client's to bound, as on macOS. A session record watch, which
+        // lets go when the user answers in the client instead, comes with Windows file following.
+        guard let response = NamedPipe.exchange(PermissionRequests.socketPath, payload, limit: 1024 * 1024),
+              !response.isEmpty else { return }
+        FileHandle.standardOutput.write(response)
         #endif
-        // Elsewhere there is no channel to the HUD yet: the hook prints nothing and the client asks as it always does.
+        // Elsewhere there is no channel to the HUD: the hook prints nothing and the client asks as it always does.
     }
 
     /// Adds the client's name to a request the HUD can answer. The hook reads nothing of the session itself: a Codex

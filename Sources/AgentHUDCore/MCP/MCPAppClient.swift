@@ -42,7 +42,19 @@ enum MCPAppClient {
     }
 
     static func call(_ request: MCPToolRequest, socket path: String, timeout: TimeInterval = timeout) -> Answer {
-        #if !canImport(Darwin)
+        #if os(Windows)
+        let message = request.message
+        guard message.count <= MCPToolRequest.sizeLimit else {
+            return .reply(.failure("The call is larger than Agent HUD reads. Send less in one call."))
+        }
+        switch NamedPipe.exchange(path, message, limit: replyLimit, timeout: timeout) {
+        case .none: return .unanswered
+        case .some(.none): return .notRunning
+        case .some(.some(let data)):
+            guard data.count <= replyLimit, let reply = MCPToolReply.read(data) else { return .unanswered }
+            return .reply(reply)
+        }
+        #elseif !canImport(Darwin)
         return .notRunning
         #else
         guard let descriptor = UnixSocket.connect(to: path) else { return .notRunning }

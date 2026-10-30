@@ -1,6 +1,8 @@
 import Foundation
 #if canImport(Darwin)
 import Darwin
+#elseif os(Windows)
+import WinSDK
 #endif
 
 /// Kernel-reported callback ancestry shared by local origin hooks; process environments are never decoded.
@@ -13,7 +15,18 @@ enum HookProcessOrigins {
     }
 
     static func ancestors() -> [Ancestor] {
-        #if !canImport(Darwin)
+        #if os(Windows)
+        let parents = WindowsProcesses.parents()
+        guard let me = WindowsProcesses.process(GetCurrentProcessId()) else { return [] }
+        var child = me, pid = parents[me.pid], seen: Set<DWORD> = [me.pid], result: [Ancestor] = []
+        while let next = pid, result.count < 16, seen.insert(next).inserted,
+              let process = WindowsProcesses.process(next), process.started <= child.started {
+            result.append(Ancestor(executable: process.executable, arguments: process.arguments))
+            child = process
+            pid = parents[next]
+        }
+        return result
+        #elseif !canImport(Darwin)
         return []
         #else
         var pid = getppid(), seen: Set<pid_t> = [], result: [Ancestor] = []
