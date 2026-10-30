@@ -313,6 +313,7 @@ public final class UnixSocketListener {
         let server = Server(), limit = requestLimit, firstBits = Int(bitPattern: first)
         self.server = server
         Thread.detachNewThread { [weak self] in
+            let listener = self
             var next = HANDLE(bitPattern: firstBits)
             while let pipe = next {
                 let connected = Bool(ConnectNamedPipe(pipe, nil)) || GetLastError() == DWORD(ERROR_PIPE_CONNECTED)
@@ -322,7 +323,7 @@ public final class UnixSocketListener {
                 }
                 if connected {
                     let bits = Int(bitPattern: pipe)
-                    Thread.detachNewThread { Self.serve(HANDLE(bitPattern: bits)!, limit: limit, server: server, listener: self) }
+                    Thread.detachNewThread { Self.serve(HANDLE(bitPattern: bits)!, limit: limit, server: server, listener: listener) }
                 } else {
                     CloseHandle(pipe)
                 }
