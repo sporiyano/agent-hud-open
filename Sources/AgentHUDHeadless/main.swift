@@ -37,10 +37,13 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-/// Keeps the lock for as long as the process runs.
-@MainActor var instanceLock: InstanceLock?
-/// The store `--watch` runs.
-@MainActor var watchedStore: UsageStore?
+@MainActor
+enum Watching {
+    /// Keeps the lock for as long as the process runs.
+    static var instanceLock: InstanceLock?
+    /// The store `--watch` runs.
+    static var store: UsageStore?
+}
 
 @MainActor
 func report(settings: SettingsStore) async -> Int32 {
@@ -60,22 +63,22 @@ func report(settings: SettingsStore) async -> Int32 {
 @MainActor
 func watch(settings: SettingsStore) {
     switch InstanceLock.claim(at: InstanceLock.sharedURL, executable: URL(fileURLWithPath: CommandLine.arguments[0])) {
-    case .acquired(let lock): instanceLock = lock
+    case .acquired(let lock): Watching.instanceLock = lock
     case .unavailable: break
     case .held(let holder): fail("Agent HUD is already running" + (holder.map { ": \($0.path)" } ?? "."))
     }
     let hooks = UsageCollectionHooks(afterPass: { _ in
-        if let store = watchedStore { emit(HeadlessSnapshot.make(store: store).line()) }
+        if let store = Watching.store { emit(HeadlessSnapshot.make(store: store).line()) }
     })
     let store = UsageAssembly.store(settings: settings, ledger: .open(), hooks: hooks)
-    watchedStore = store
+    Watching.store = store
     if store.report != nil { emit(HeadlessSnapshot.make(store: store).line()) }
     store.start()
     // The interface holds the other end of standard input: a `refresh` line reads the accounts again, and when the
     // interface goes, so does this.
     Thread.detachNewThread {
         while let line = readLine(strippingNewline: true) {
-            if line == "refresh" { Task { @MainActor in await watchedStore?.refreshAccounts() } }
+            if line == "refresh" { Task { @MainActor in await Watching.store?.refreshAccounts() } }
         }
         exit(0)
     }
