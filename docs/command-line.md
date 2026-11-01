@@ -150,3 +150,16 @@ codex mcp remove agent-hud
 ## Related
 
 [session-lifecycle.md](session-lifecycle.md) completion hooks and the observers · [providers.md](providers.md) per-client environment variables · [architecture.md](architecture.md) host integration · [hud.md](hud.md#panel-layout) the panel's layout · [data-access.md](data-access.md#agent-tools) what the MCP tools read and change
+
+## agenthud-core
+
+`agenthud-core` (`swift build --product agenthud-core`) is Core without an interface, for a host that draws its own, such as the Windows shell. It builds on macOS, Windows and Linux, and answers the same hook and adapter commands as the application.
+
+| Command | Effect |
+| --- | --- |
+| `--watch` | Reads as the application does, with its usage ledger and the instance lock, and prints a `HeadlessSnapshot` as one line of JSON after every pass. A `refresh` line on standard input reads the accounts again; when standard input closes it quits, so it never outlives the interface that started it. |
+| `--report` | Reads once, keeping nothing, and prints one snapshot line. |
+| `--probe` | The application's `--probe`. |
+| `--lang zh\|en\|system` | The language of the names, countdowns and amounts in the snapshots. |
+
+A snapshot holds `version` (1), `generatedAt`, `language`, `rows` (each quota window: `id`, `vendor`, `vendorName`, `name`, `shortName`, `usedPct`, `weeklyUsedPct`, `resetAt`, `resetLabel`, `level`, `paletteIndex`, `isCurrentAccount`), `sessions` (`id`, `agentId`, `vendor`, `title`, `client`, `project`, `status`, `isLive`, `isWaiting`, `tokensIn`, `tokensOut`, `startedAt`, `observedAt`), `billing` (`id`, `name`, `balances` in words), `maxUsedPct`, `level`, `workingVendors`, `isLoading` and `error`. Dates are ISO 8601. New fields may appear without a new version.

@@ -13,11 +13,14 @@ let sqlite: Target.Dependency = .product(name: "SwiftToolchainCSQLite", package:
 var products: [Product] = [
     .library(name: "AgentHUDSupport", targets: ["AgentHUDSupport"]),
     .library(name: "AgentHUDCore", targets: ["AgentHUDCore"]),
+    .executable(name: "agenthud-core", targets: ["AgentHUDHeadless"]),
 ]
 
 var targets: [Target] = [
     .target(name: "AgentHUDSupport", dependencies: [crypto], swiftSettings: [.swiftLanguageMode(.v6)]),
     .target(name: "AgentHUDCore", dependencies: ["AgentHUDSupport", crypto, sqlite], swiftSettings: [.swiftLanguageMode(.v6)]),
+    // Core without an interface, for a host that draws its own (the Windows shell).
+    .executableTarget(name: "AgentHUDHeadless", dependencies: ["AgentHUDCore"], swiftSettings: [.swiftLanguageMode(.v6)]),
     .testTarget(name: "AgentHUDSupportTests", dependencies: ["AgentHUDSupport"]),
     .testTarget(name: "AgentHUDCoreTests", dependencies: ["AgentHUDCore", "AgentHUDSupport"],
                 resources: [.copy("Providers/Kit/Zstandard/Fixtures")]),
