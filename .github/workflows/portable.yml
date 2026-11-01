@@ -70,11 +70,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Build agenthud-core
+      # Compiled, not linked: Swift 6.1's Observation library on Linux misses a runtime symbol at link time, and
+      # Linux is only here for quicker compile errors.
+      - name: Compile agenthud-core
         shell: bash
         run: |
           set -o pipefail
-          swift build --product agenthud-core 2>&1 | tee build.log || {
+          swift build --target AgentHUDHeadless 2>&1 | tee build.log || {
             echo "=== DISTINCT ERRORS ==="; grep -E "(\.swift:[0-9]+:[0-9]+: error:|^error:)" build.log | sed -E 's/^.*Sources/Sources/' | sort -u | head -300
             exit 1
           }
