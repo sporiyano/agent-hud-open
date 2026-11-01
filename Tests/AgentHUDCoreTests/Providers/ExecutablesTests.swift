@@ -40,8 +40,8 @@ final class ClaudeWindowsRootsTests: XCTestCase {
         let roots = ClaudeEngineLocator.windowsDesktopRoots(
             home: home, environment: ["APPDATA": home.appendingPathComponent("Roaming").path,
                                       "LOCALAPPDATA": home.appendingPathComponent("Local").path])
-        XCTAssertEqual(roots.map { $0.pathComponents.suffix(4).joined(separator: "/") },
-                       ["\(home.lastPathComponent)/Roaming/Claude".split(separator: "/").suffix(4).joined(separator: "/"),
-                        "AnthropicPBC.Claude_fnn82j28hfe8t/LocalCache/Roaming/Claude"])
+        XCTAssertEqual(roots.map { $0.pathComponents.suffix(3).joined(separator: "/") },
+                       ["\(home.lastPathComponent)/Roaming/Claude", "LocalCache/Roaming/Claude"])
+        XCTAssertEqual(roots.last?.pathComponents.dropLast(3).last, "AnthropicPBC.Claude_fnn82j28hfe8t")
     }
 }
