@@ -37,14 +37,36 @@ public enum CodexLocator {
     }
 
     private static func desktop(home: URL, applications: URL) -> [URL] {
-        [applications, home.appendingPathComponent("Applications")].flatMap { root in
+        #if os(Windows)
+        return windowsDesktop(home: home)
+        #else
+        return [applications, home.appendingPathComponent("Applications")].flatMap { root in
             ["Codex.app", "ChatGPT.app"].flatMap { engines(in: root.appendingPathComponent($0)) }
         }
+        #endif
+    }
+
+    /// The Windows app keeps its engine in `%LOCALAPPDATA%\OpenAI\Codex\bin\<build>\codex.exe`, one folder per
+    /// build: the newest first.
+    static func windowsDesktop(home: URL, environment: [String: String] = ProcessInfo.processInfo.environment,
+                               fileManager: FileManager = .default) -> [URL] {
+        let local = environment["LOCALAPPDATA"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? home.appendingPathComponent("AppData/Local", isDirectory: true)
+        let bin = local.appendingPathComponent("OpenAI/Codex/bin", isDirectory: true)
+        let builds = (try? fileManager.contentsOfDirectory(at: bin, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        func modified(_ url: URL) -> Date {
+            (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        return builds.sorted { modified($0) > modified($1) }.map { $0.appendingPathComponent("codex.exe") }
     }
 
     private static func cli(home: URL, path: String) -> [URL] {
-        [home.appendingPathComponent(".bun/bin/codex"), home.appendingPathComponent(".local/bin/codex"),
+        #if os(Windows)
+        return [home.appendingPathComponent(".local/bin/codex.exe")] + Executables.onPath("codex", path: path)
+        #else
+        return [home.appendingPathComponent(".bun/bin/codex"), home.appendingPathComponent(".local/bin/codex"),
          URL(fileURLWithPath: "/opt/homebrew/bin/codex"), URL(fileURLWithPath: "/usr/local/bin/codex")]
             + Executables.onPath("codex", path: path)
+        #endif
     }
 }

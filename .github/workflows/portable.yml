@@ -1,7 +1,9 @@
 name: Portable core
 
-# Builds the data libraries off macOS: Windows, where the Windows application runs on them, and Linux, which is
-# quicker to read failures from. The desktop interface is macOS only and is not part of these builds.
+# Builds the data libraries and agenthud-core off macOS: Windows, where the Windows application runs on them, and
+# Linux, which is quicker to read failures from. The Windows job uploads agenthud-core with the Swift runtime beside
+# it, with the WinUI 3 shell in windows/AgentHUD, as one folder that runs on its own. The Mac interface is not part
+# of these builds.
 
 on:
   push:
@@ -23,14 +25,44 @@ jobs:
         with:
           branch: swift-6.1.2-release
           tag: 6.1.2-RELEASE
-      - name: Build AgentHUDCore
+      - name: Build agenthud-core
         shell: bash
         run: |
           set -o pipefail
-          swift build --target AgentHUDCore 2>&1 | tee build.log || {
+          swift build -c release --product agenthud-core 2>&1 | tee build.log || {
             echo "=== DISTINCT ERRORS ==="; grep -E "(\.swift:[0-9]+:[0-9]+: error:|^error:)" build.log | sed -E 's/^.*Sources/Sources/' | sort -u | head -300
             exit 1
           }
+      - name: Gather agenthud-core with the Swift runtime
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "$(swift build -c release --show-bin-path)/agenthud-core.exe" dist/
+          runtime="$(dirname "$(command -v swiftCore.dll)")"
+          echo "Swift runtime: $runtime"
+          cp "$runtime"/*.dll dist/
+          ls -la dist
+      - name: Try it
+        shell: bash
+        run: |
+          dist/agenthud-core.exe --report --lang en > report.json || true
+          head -c 2000 report.json; echo
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build the Windows shell
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet publish windows/AgentHUD/AgentHUD.csproj -c Release -r win-x64 -p:Platform=x64 -o dist 2>&1 | tee shell.log || {
+            echo "=== DISTINCT ERRORS ==="; grep -E "error [A-Z]+[0-9]+" shell.log | sed -E 's/^.*windows/windows/' | sort -u | head -100
+            exit 1
+          }
+          ls dist | head -50
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-hud-windows-x64
+          path: dist
 
   linux:
     runs-on: ubuntu-latest
@@ -38,11 +70,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Build AgentHUDCore
+      # Compiled, not linked: Swift 6.1's Observation library on Linux misses a runtime symbol at link time, and
+      # Linux is only here for quicker compile errors.
+      - name: Compile agenthud-core
         shell: bash
         run: |
           set -o pipefail
-          swift build --target AgentHUDCore 2>&1 | tee build.log || {
+          swift build --target AgentHUDHeadless 2>&1 | tee build.log || {
             echo "=== DISTINCT ERRORS ==="; grep -E "(\.swift:[0-9]+:[0-9]+: error:|^error:)" build.log | sed -E 's/^.*Sources/Sources/' | sort -u | head -300
             exit 1
           }

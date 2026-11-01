@@ -20,7 +20,12 @@ public actor ClaudeDesktopSessions {
     }
 
     public nonisolated static func defaultRoots(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        #if os(Windows)
+        let base = ClaudeEngineLocator.windowsDesktopRoots(home: home).first { FileManager.default.fileExists(atPath: $0.path) }
+            ?? ClaudeEngineLocator.windowsDesktopRoots(home: home)[0]
+        #else
         let base = home.appendingPathComponent("Library/Application Support/Claude", isDirectory: true)
+        #endif
         return ["claude-code-sessions", "local-agent-mode-sessions"].map { base.appendingPathComponent($0, isDirectory: true) }
     }
 

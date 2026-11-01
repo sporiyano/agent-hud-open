@@ -13,6 +13,11 @@ public enum ClaudeEngineLocator {
 
     /// The CLI's install places and `PATH`, without the desktop app's engines.
     static func cli(home: URL, path: String) -> [URL] {
+        #if os(Windows)
+        // The native installer's place, then the older local install, then `PATH`.
+        let list = [home.appendingPathComponent(".local/bin/claude.exe"), home.appendingPathComponent(".claude/local/claude.exe")]
+        return list + Executables.onPath("claude", path: path)
+        #else
         let list = [
             home.appendingPathComponent(".local/bin/claude"),
             home.appendingPathComponent(".claude/local/claude"),
@@ -21,6 +26,7 @@ public enum ClaudeEngineLocator {
         ]
         let versions = home.appendingPathComponent(".local/share/claude/versions", isDirectory: true)
         return list + newestFirst(in: versions) + Executables.onPath("claude", path: path)
+        #endif
     }
 
     public static func find(home: URL = FileManager.default.homeDirectoryForCurrentUser, fileManager: FileManager = .default,
@@ -30,10 +36,35 @@ public enum ClaudeEngineLocator {
 
     /// The desktop app's engines, newest version first.
     static func desktop(home: URL) -> [URL] {
+        #if os(Windows)
+        // The desktop app keeps its engines in its roaming data, `Claude\claude-code\<version>\claude.exe`; the Store
+        // (MSIX) install's roaming data lies under its package instead.
+        return windowsDesktopRoots(home: home).flatMap { root in
+            newestFirst(in: root.appendingPathComponent("claude-code", isDirectory: true)).flatMap { version in
+                [version.appendingPathComponent("claude.exe")] + newestFirst(in: version).map { $0.appendingPathComponent("claude.exe") }
+            }
+        }
+        #else
         let root = home.appendingPathComponent("Library/Application Support/Claude/claude-code", isDirectory: true)
         return newestFirst(in: root).flatMap { version in
             newestFirst(in: version).map { $0.appendingPathComponent("claude.app/Contents/MacOS/claude") }
         }
+        #endif
+    }
+
+    /// The Claude desktop app's data folders on Windows: `%APPDATA%\Claude`, then the Store install's
+    /// `%LOCALAPPDATA%\Packages\AnthropicPBC.Claude_*\LocalCache\Roaming\Claude`.
+    static func windowsDesktopRoots(home: URL, environment: [String: String] = ProcessInfo.processInfo.environment,
+                                    fileManager: FileManager = .default) -> [URL] {
+        let roaming = environment["APPDATA"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? home.appendingPathComponent("AppData/Roaming", isDirectory: true)
+        let local = environment["LOCALAPPDATA"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? home.appendingPathComponent("AppData/Local", isDirectory: true)
+        let packages = local.appendingPathComponent("Packages", isDirectory: true)
+        let store = ((try? fileManager.contentsOfDirectory(atPath: packages.path)) ?? [])
+            .filter { $0.hasPrefix("AnthropicPBC.Claude_") }.sorted()
+            .map { packages.appendingPathComponent($0).appendingPathComponent("LocalCache/Roaming/Claude", isDirectory: true) }
+        return [roaming.appendingPathComponent("Claude", isDirectory: true)] + store
     }
 
     /// The visible entries of `directory`, highest version number first.
