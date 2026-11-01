@@ -37,11 +37,12 @@ public enum ClaudeEngineLocator {
     /// The desktop app's engines, newest version first.
     static func desktop(home: URL) -> [URL] {
         #if os(Windows)
-        // The desktop app keeps its engines in its roaming data, `claude-code\<version>\claude.exe`.
-        let roaming = ProcessInfo.processInfo.environment["APPDATA"].map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? home.appendingPathComponent("AppData/Roaming", isDirectory: true)
-        return newestFirst(in: roaming.appendingPathComponent("Claude/claude-code", isDirectory: true)).flatMap { version in
-            [version.appendingPathComponent("claude.exe")] + newestFirst(in: version).map { $0.appendingPathComponent("claude.exe") }
+        // The desktop app keeps its engines in its roaming data, `Claude\claude-code\<version>\claude.exe`; the Store
+        // (MSIX) install's roaming data lies under its package instead.
+        return windowsDesktopRoots(home: home).flatMap { root in
+            newestFirst(in: root.appendingPathComponent("claude-code", isDirectory: true)).flatMap { version in
+                [version.appendingPathComponent("claude.exe")] + newestFirst(in: version).map { $0.appendingPathComponent("claude.exe") }
+            }
         }
         #else
         let root = home.appendingPathComponent("Library/Application Support/Claude/claude-code", isDirectory: true)
@@ -49,6 +50,21 @@ public enum ClaudeEngineLocator {
             newestFirst(in: version).map { $0.appendingPathComponent("claude.app/Contents/MacOS/claude") }
         }
         #endif
+    }
+
+    /// The Claude desktop app's data folders on Windows: `%APPDATA%\Claude`, then the Store install's
+    /// `%LOCALAPPDATA%\Packages\AnthropicPBC.Claude_*\LocalCache\Roaming\Claude`.
+    static func windowsDesktopRoots(home: URL, environment: [String: String] = ProcessInfo.processInfo.environment,
+                                    fileManager: FileManager = .default) -> [URL] {
+        let roaming = environment["APPDATA"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? home.appendingPathComponent("AppData/Roaming", isDirectory: true)
+        let local = environment["LOCALAPPDATA"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? home.appendingPathComponent("AppData/Local", isDirectory: true)
+        let packages = local.appendingPathComponent("Packages", isDirectory: true)
+        let store = ((try? fileManager.contentsOfDirectory(atPath: packages.path)) ?? [])
+            .filter { $0.hasPrefix("AnthropicPBC.Claude_") }.sorted()
+            .map { packages.appendingPathComponent($0).appendingPathComponent("LocalCache/Roaming/Claude", isDirectory: true) }
+        return [roaming.appendingPathComponent("Claude", isDirectory: true)] + store
     }
 
     /// The visible entries of `directory`, highest version number first.

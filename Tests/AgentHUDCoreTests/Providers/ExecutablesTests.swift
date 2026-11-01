@@ -28,3 +28,20 @@ final class ExecutablesTests: XCTestCase {
         XCTAssertTrue(CodexLocator.windowsDesktop(home: local, environment: [:]).isEmpty, "no AppData under this home")
     }
 }
+
+final class ClaudeWindowsRootsTests: XCTestCase {
+    func testTheDesktopAppsRoamingFolderComesBeforeTheStoreInstallsPackage() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let packages = home.appendingPathComponent("Local/Packages", isDirectory: true)
+        for name in ["AnthropicPBC.Claude_fnn82j28hfe8t", "OpenAI.Codex_2p2nqsd0c76g0"] {
+            try FileManager.default.createDirectory(at: packages.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        let roots = ClaudeEngineLocator.windowsDesktopRoots(
+            home: home, environment: ["APPDATA": home.appendingPathComponent("Roaming").path,
+                                      "LOCALAPPDATA": home.appendingPathComponent("Local").path])
+        XCTAssertEqual(roots.map { $0.pathComponents.suffix(4).joined(separator: "/") },
+                       ["\(home.lastPathComponent)/Roaming/Claude".split(separator: "/").suffix(4).joined(separator: "/"),
+                        "AnthropicPBC.Claude_fnn82j28hfe8t/LocalCache/Roaming/Claude"])
+    }
+}
