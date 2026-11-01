@@ -27,3 +27,7 @@ signing/
 *.dmg
 *.ipa
 tmp/
+
+# Windows shell build products
+windows/**/bin/
+windows/**/obj/
