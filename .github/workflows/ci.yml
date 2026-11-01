@@ -18,7 +18,13 @@ jobs:
       - name: Check source boundaries
         run: python3 scripts/check-source-boundaries.py
       - name: Test
-        run: swift test
+        shell: bash
+        run: |
+          set -o pipefail
+          if swift test 2>&1 | tee test.log; then exit 0; fi
+          echo "=== FAILURES ==="
+          grep -E '(: error: |\] failed \(|✘ )' test.log | sort -u | head -60
+          exit 1
 
   app:
     runs-on: macos-15

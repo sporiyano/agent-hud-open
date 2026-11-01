@@ -1,6 +1,8 @@
 import Foundation
 #if canImport(Security)
 import Security
+#elseif os(Windows)
+import WinSDK
 #endif
 
 // Credential order and request headers follow Tokscale usage/copilot.rs (MIT); quota fields are informed by CodexBar CopilotUsageFetcher (MIT).
@@ -157,8 +159,9 @@ struct CopilotCredentials: Sendable {
     }
 
     static func genericPassword(service: String) -> String? {
-        #if !canImport(Security)
-        // Windows Credential Manager comes with the Windows build; the environment and hosts.yml still apply.
+        #if os(Windows)
+        return windowsCredential(service: service)
+        #elseif !canImport(Security)
         return nil
         #else
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
@@ -168,4 +171,23 @@ struct CopilotCredentials: Sendable {
         return String(data: data, encoding: .utf8)
         #endif
     }
+
+    #if os(Windows)
+    /// The GitHub CLI keeps its token in Windows Credential Manager as a generic credential named `<service>:<user>`
+    /// (`gh:github.com:` for the default account), its blob the token's UTF-8 bytes.
+    private static func windowsCredential(service: String) -> String? {
+        var count: DWORD = 0
+        var found: UnsafeMutablePointer<PCREDENTIALW?>?
+        let listed = (service + ":*").withCString(encodedAs: UTF16.self) { CredEnumerateW($0, 0, &count, &found) }
+        guard Bool(listed), let found else { return nil }
+        defer { CredFree(found) }
+        for index in 0..<Int(count) {
+            guard let credential = found[index]?.pointee, credential.Type == DWORD(CRED_TYPE_GENERIC),
+                  let blob = credential.CredentialBlob, credential.CredentialBlobSize > 0 else { continue }
+            let token = String(decoding: UnsafeBufferPointer(start: blob, count: Int(credential.CredentialBlobSize)), as: UTF8.self)
+            if let token = clean(token) { return token }
+        }
+        return nil
+    }
+    #endif
 }

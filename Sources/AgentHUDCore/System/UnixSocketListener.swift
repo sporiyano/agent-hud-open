@@ -2,6 +2,8 @@ import Foundation
 #if canImport(Network)
 import Network
 import os.log
+#elseif os(Windows)
+import WinSDK
 #endif
 
 /// One request's connection to the process that sent it, which waits on it for an answer.
@@ -40,6 +42,59 @@ public final class LocalConnection {
 
     /// Lets the connection go without an answer.
     public func cancel() { connection.cancel() }
+    #elseif os(Windows)
+    private let hold: PipeHold
+    private var closed = false, watching = false
+    private var closeHandler: (@MainActor () -> Void)?
+
+    init(_ hold: PipeHold) { self.hold = hold }
+
+    /// Whether the sender went away or the connection was let go.
+    public var isClosed: Bool { closed }
+
+    /// Called once the sender goes away; replaces any handler set before. A pipe says nothing when its client leaves,
+    /// so it is looked at four times a second while a handler waits.
+    public func onClose(_ handler: @escaping @MainActor () -> Void) {
+        closeHandler = handler
+        guard !watching, !closed else { return }
+        watching = true
+        let hold = hold
+        Thread.detachNewThread { [weak self] in
+            while true {
+                Thread.sleep(forTimeInterval: 0.25)
+                // Nil once this side let the pipe go: nothing more to watch.
+                guard let connected = hold.with(NamedPipe.isConnected) else { return }
+                if connected { continue }
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.senderLeft() } }
+                return
+            }
+        }
+    }
+
+    private func senderLeft() {
+        guard !closed else { return }
+        closed = true
+        hold.release(flushing: false)
+        closeHandler?()
+    }
+
+    /// Writes the answer, then lets the connection go once the sender has read it.
+    public func reply(_ data: Data) {
+        guard !closed else { return }
+        closed = true
+        let hold = hold
+        Thread.detachNewThread {
+            _ = hold.with { NamedPipe.write($0, data) }
+            hold.release(flushing: true)
+        }
+    }
+
+    /// Lets the connection go without an answer.
+    public func cancel() {
+        guard !closed else { return }
+        closed = true
+        hold.release(flushing: false)
+    }
     #else
     public var isClosed: Bool { true }
 
@@ -196,6 +251,113 @@ private final class SocketMask {
     }
 }
 
+#elseif os(Windows)
+/// One connected pipe instance, shared by the threads that use it; once released it is never touched again.
+final class PipeHold: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: HANDLE?
+
+    init(_ handle: HANDLE) { self.handle = handle }
+
+    /// `body` with the pipe, or nil once it was released.
+    func with<R>(_ body: (HANDLE) -> R) -> R? { lock.withLock { handle.map(body) } }
+
+    /// Lets the pipe go, after the client read what was written when `flushing`.
+    func release(flushing: Bool) {
+        lock.withLock {
+            guard let pipe = handle else { return }
+            if flushing { FlushFileBuffers(pipe) }
+            DisconnectNamedPipe(pipe)
+            CloseHandle(pipe)
+            handle = nil
+        }
+    }
+}
+
+/// The application's side of the channel on Windows: a named pipe standing for the socket at `path`. Each request
+/// is handed, once read whole, to `onRequest` with its connection, which answers it or lets it go. One process serves
+/// a name: a second copy of the application cannot create its first instance.
+@MainActor
+public final class UnixSocketListener {
+    public let path: String
+    /// The largest request read; a longer one closes its connection.
+    public let requestLimit: Int
+    private let onRequest: @MainActor (Data, LocalConnection) -> Void
+    private var server: Server?
+
+    /// The accepting thread's view of the listener.
+    private final class Server: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stopped = false
+        var isStopped: Bool { lock.withLock { stopped } }
+        func stop() { lock.withLock { stopped = true } }
+    }
+
+    public init(path: String, requestLimit: Int, category: String, onRequest: @escaping @MainActor (Data, LocalConnection) -> Void) {
+        self.path = path
+        self.requestLimit = requestLimit
+        self.onRequest = onRequest
+    }
+
+    public var isListening: Bool { server != nil }
+
+    /// Starts listening; false when another process serves the pipe or it cannot be made.
+    @discardableResult
+    public func start() -> Bool {
+        guard server == nil else { return true }
+        let name = NamedPipe.name(for: path)
+        guard let first = NamedPipe.instance(name, first: true) else {
+            NSLog("[AgentHUD] Another instance serves %@, or the pipe could not be made: error %u", name, GetLastError())
+            return false
+        }
+        let server = Server(), limit = requestLimit, firstBits = Int(bitPattern: first)
+        self.server = server
+        Thread.detachNewThread { [weak self] in
+            let listener = self
+            var next = HANDLE(bitPattern: firstBits)
+            while let pipe = next {
+                let connected = Bool(ConnectNamedPipe(pipe, nil)) || GetLastError() == DWORD(ERROR_PIPE_CONNECTED)
+                if server.isStopped {
+                    CloseHandle(pipe)
+                    return
+                }
+                if connected {
+                    let bits = Int(bitPattern: pipe)
+                    Thread.detachNewThread { Self.serve(HANDLE(bitPattern: bits)!, limit: limit, server: server, listener: listener) }
+                } else {
+                    CloseHandle(pipe)
+                }
+                next = NamedPipe.instance(name, first: false)
+            }
+        }
+        return true
+    }
+
+    /// Reads one framed request and hands it to the main actor.
+    private nonisolated static func serve(_ pipe: HANDLE, limit: Int, server: Server, listener: UnixSocketListener?) {
+        let hold = PipeHold(pipe)
+        guard let header = hold.with({ NamedPipe.read($0, count: 4) }) ?? nil else { return hold.release(flushing: false) }
+        let length = header.withUnsafeBytes { Int(UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self))) }
+        guard length <= limit, let data = length == 0 ? Data() : (hold.with({ NamedPipe.read($0, count: length) }) ?? nil) else {
+            return hold.release(flushing: false)
+        }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard let listener, listener.server === server, !server.isStopped else { return hold.release(flushing: false) }
+                listener.onRequest(data, LocalConnection(hold))
+            }
+        }
+    }
+
+    /// Stops listening. Connections already handed out stay with their owners.
+    public func stop() {
+        guard let server else { return }
+        server.stop()
+        self.server = nil
+        // The accepting thread waits for a client: one that connects and leaves lets it see the stop.
+        _ = NamedPipe.exchange(path, Data(), limit: 0, waitForAnswer: false)
+    }
+}
 #else
 /// Off macOS nothing listens yet: `start()` reports that the channel could not be opened.
 @MainActor
